@@ -10,22 +10,23 @@ The application uses PostgreSQL as the primary relational database. The schema i
 - immutable order events
 - slow-order alerts.
 
+
 ## Tables
 
 ### 1. users
 
 Stores application users and their roles.
 
-Column              Type
-
-id               UUID                 Primary key
-name             VARCHAR(100)         NOT NULL
-email            VARCHAR(255)         UNIQUE
-password_hash    VARCHAR(255)         NOT NULL
-role             ENUM                 NOT NULL (`MANAGER`, `WAITER`)
-archived_at      TIMESTAMP            NULL
-created_at       TIMESTAMP            NOT NULL
-updated_at       TIMESTAMP            NOT NULL
+| Column        | Type         | Constraints                    |
+| ------------- | ------------ | ------------------------------ |
+| id            | UUID         | Primary key                    |
+| name          | VARCHAR(100) | NOT NULL                       |
+| email         | VARCHAR(255) | NOT NULL, UNIQUE               |
+| password_hash | VARCHAR(255) | NOT NULL                       |
+| role          | ENUM         | NOT NULL (`MANAGER`, `WAITER`) |
+| archived_at   | TIMESTAMP    | NULL                           |
+| created_at    | TIMESTAMP    | NOT NULL                       |
+| updated_at    | TIMESTAMP    | NOT NULL                       |
 
 A user can be either a manager or waiter.
 
@@ -34,15 +35,15 @@ A user can be either a manager or waiter.
 
 Stores the current restaurant menu.
 
-Column       Type           Constraints
-
-id           UUID           Primary key
-name         VARCHAR(150)   NOT NULL
-price        DECIMAL(10,2)  NOT NULL, >= 0
-available    BOOLEAN        NOT NULL
-archived_at  TIMESTAMP      NULL
-created_at   TIMESTAMP      NOT NULL
-updated_at   TIMESTAMP      NOT NULL
+| Column      | Type          | Constraints    |
+| ----------- | ------------- | -------------- |
+| id          | UUID          | Primary key    |
+| name        | VARCHAR(150)  | NOT NULL       |
+| price       | DECIMAL(10,2) | NOT NULL, >= 0 |
+| available   | BOOLEAN       | NOT NULL       |
+| archived_at | TIMESTAMP     | NULL           |
+| created_at  | TIMESTAMP     | NOT NULL       |
+| updated_at  | TIMESTAMP     | NOT NULL       |
 
 
 
@@ -50,19 +51,18 @@ updated_at   TIMESTAMP      NOT NULL
 
 Represents a restaurant order.
 
-Column             Type         Constraints
-
-id                 UUID         Primary key
-table_number       VARCHAR(20)  NOT NULL
-primary_waiter_id  UUID         NOT NULL, FK → users.id
-status             ENUM         NOT NULL
-placed_at          TIMESTAMP    NOT NULL
-archived_at        TIMESTAMP    NULL
-created_at         TIMESTAMP    NOT NULL
-updated_at         TIMESTAMP    NOT NULL
+| Column            | Type        | Constraints             |
+| ----------------- | ----------- | ----------------------- |
+| id                | UUID        | Primary key             |
+| table_number      | VARCHAR(20) | NOT NULL                |
+| primary_waiter_id | UUID        | NOT NULL, FK → users.id |
+| status            | ENUM        | NOT NULL                |
+| placed_at         | TIMESTAMP   | NOT NULL                |
+| archived_at       | TIMESTAMP   | NULL                    |
+| created_at        | TIMESTAMP   | NOT NULL                |
+| updated_at        | TIMESTAMP   | NOT NULL                |
 
 Order status values are:
-
 - PLACED
 - ACCEPTED
 - PREPARING
@@ -77,22 +77,21 @@ Every order has one primary waiter.
 
 Stores the individual menu items belonging to an order.
 
-Column        Type           Constraints
-
-id            UUID           Primary key
-order_id      UUID           NOT NULL, FK → orders.id
-menu_item_id  UUID           NOT NULL, FK → menu_items.id
-quantity      INTEGER        NOT NULL, > 0
-unit_price    DECIMAL(10,2)  NOT NULL, >= 0
-instructions  TEXT           NULL
-voided_at     TIMESTAMP      NULL
-void_reason   TEXT           NULL
-created_at    TIMESTAMP      NOT NULL
+| Column       | Type          | Constraints                  |
+| ------------ | ------------- | ---------------------------- |
+| id           | UUID          | Primary key                  |
+| order_id     | UUID          | NOT NULL, FK → orders.id     |
+| menu_item_id | UUID          | NOT NULL, FK → menu_items.id |
+| quantity     | INTEGER       | NOT NULL, > 0                |
+| unit_price   | DECIMAL(10,2) | NOT NULL, >= 0               |
+| instructions | TEXT          | NULL                         |
+| voided_at    | TIMESTAMP     | NULL                         |
+| void_reason  | TEXT          | NULL                         |
+| created_at   | TIMESTAMP     | NOT NULL                     |
 
 `unit_price` ensures that historical price remains same even if menu price changes in future.
 
 Line totals are calculated as:
-
 `quantity × unit_price`
 
 Only non-voided lines contribute to the order total.
@@ -102,15 +101,14 @@ Only non-voided lines contribute to the order total.
 
 Represents additional waiters working on an order.
 
-Column            Type       Constraints
-
-order_id          UUID       FK → orders.id
-user_id           UUID       FK → users.id
-added_by_user_id  UUID       FK → users.id
-created_at        TIMESTAMP  NOT NULL
+| Column           | Type      | Constraints    |
+| ---------------- | --------- | -------------- |
+| order_id         | UUID      | FK → orders.id |
+| user_id          | UUID      | FK → users.id  |
+| added_by_user_id | UUID      | FK → users.id  |
+| created_at       | TIMESTAMP | NOT NULL       |
 
 The composite key is:
-
 `(order_id, user_id)`
 
 This prevents the same waiter from being added to the same order more than once.
@@ -120,22 +118,21 @@ This prevents the same waiter from being added to the same order more than once.
 
 Stores the immutable order timeline.
 
-Column         Type       Constraints
-
-id             UUID       Primary key
-order_id       UUID       NOT NULL, FK → orders.id
-actor_user_id  UUID       NOT NULL, FK → users.id
-event_type     ENUM       NOT NULL
-old_status     ENUM       NULL
-new_status     ENUM       NULL
-order_line_id  UUID       NULL, FK → order_lines.id
-reason         TEXT       NULL
-note           TEXT       NULL
-metadata       JSONB      NULL
-created_at     TIMESTAMP  NOT NULL
+| Column        | Type      | Constraints               |
+| ------------- | --------- | ------------------------- |
+| id            | UUID      | Primary key               |
+| order_id      | UUID      | NOT NULL, FK → orders.id  |
+| actor_user_id | UUID      | NOT NULL, FK → users.id   |
+| event_type    | ENUM      | NOT NULL                  |
+| old_status    | ENUM      | NULL                      |
+| new_status    | ENUM      | NULL                      |
+| order_line_id | UUID      | NULL, FK → order_lines.id |
+| reason        | TEXT      | NULL                      |
+| note          | TEXT      | NULL                      |
+| metadata      | JSONB     | NULL                      |
+| created_at    | TIMESTAMP | NOT NULL                  |
 
 Possible event types include:
-
 - ORDER_CREATED
 - STATUS_CHANGED
 - LINE_ADDED
@@ -152,15 +149,15 @@ This table is used to provide the immutable order timeline required by the appli
 
 Stores acknowledgement state for slow-order alerts.
 
-Column           Type       Constraints
-
-id               UUID       Primary key
-order_id         UUID       NOT NULL, FK → orders.id
-acknowledged_by  UUID       NULL, FK → users.id
-acknowledged_at  TIMESTAMP  NULL
-next_alert_at    TIMESTAMP  NULL
-created_at       TIMESTAMP  NOT NULL
-updated_at       TIMESTAMP  NOT NULL
+| Column          | Type      | Constraints              |
+| --------------- | --------- | ------------------------ |
+| id              | UUID      | Primary key              |
+| order_id        | UUID      | NOT NULL, FK → orders.id |
+| acknowledged_by | UUID      | NULL, FK → users.id      |
+| acknowledged_at | TIMESTAMP | NULL                     |
+| next_alert_at   | TIMESTAMP | NULL                     |
+| created_at      | TIMESTAMP | NOT NULL                 |
+| updated_at      | TIMESTAMP | NOT NULL                 |
 
 The order's timestamps are used to determine whether it has become slow.
 The alert record primarily tracks acknowledgement and when an alert may appear again.
