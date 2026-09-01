@@ -1,0 +1,153 @@
+generator client {
+  provider   = "prisma-client"
+  output     = "../src/generated/prisma"
+  engineType = "client"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  MANAGER
+  WAITER
+}
+
+enum OrderStatus {
+  PLACED
+  ACCEPTED
+  PREPARING
+  READY
+  SERVED
+  CANCELLED
+}
+
+enum OrderEventType {
+  ORDER_CREATED
+  STATUS_CHANGED
+  LINE_ADDED
+  LINE_VOIDED
+  NOTE_ADDED
+  COLLABORATOR_ADDED
+  COLLABORATOR_REMOVED
+}
+
+model User {
+  id           String    @id @default(uuid())
+  name         String    @db.VarChar(100)
+  email        String    @unique @db.VarChar(255)
+  passwordHash String    @db.VarChar(255)
+  role         Role
+  archivedAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  primaryOrders      Order[]             @relation("PrimaryWaiter")
+  events             OrderEvent[]        @relation("EventActor")
+  collaborations     OrderCollaborator[]
+  alertsAcknowledged OrderAlert[]        @relation("AlertAcknowledgedBy")
+  addedCollaborators OrderCollaborator[] @relation("CollaboratorAddedBy")
+}
+
+model MenuItem {
+  id         String    @id @default(uuid())
+  name       String    @db.VarChar(150)
+  price      Decimal   @db.Decimal(10, 2)
+  available  Boolean   @default(true)
+  archivedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  orderLines OrderLine[]
+}
+
+model Order {
+  id              String      @id @default(uuid())
+  tableNumber     String      @db.VarChar(20)
+  primaryWaiterId String
+  status          OrderStatus @default(PLACED)
+  placedAt        DateTime    @default(now())
+  archivedAt      DateTime?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  primaryWaiter User                @relation("PrimaryWaiter", fields: [primaryWaiterId], references: [id])
+  lines         OrderLine[]
+  collaborators OrderCollaborator[]
+  events        OrderEvent[]
+  alerts        OrderAlert[]
+
+  @@index([status])
+  @@index([primaryWaiterId])
+  @@index([placedAt])
+}
+
+model OrderLine {
+  id           String    @id @default(uuid())
+  orderId      String
+  menuItemId   String
+  quantity     Int
+  unitPrice    Decimal   @db.Decimal(10, 2)
+  instructions String?
+  voidedAt     DateTime?
+  voidReason   String?
+  createdAt    DateTime  @default(now())
+
+  order    Order        @relation(fields: [orderId], references: [id])
+  menuItem MenuItem     @relation(fields: [menuItemId], references: [id])
+  events   OrderEvent[]
+
+  @@index([orderId])
+  @@index([menuItemId])
+}
+
+model OrderCollaborator {
+  orderId       String
+  userId        String
+  addedByUserId String
+  createdAt     DateTime @default(now())
+
+  order   Order @relation(fields: [orderId], references: [id])
+  user    User  @relation(fields: [userId], references: [id])
+  addedBy User  @relation("CollaboratorAddedBy", fields: [addedByUserId], references: [id])
+
+  @@id([orderId, userId])
+  @@index([userId])
+}
+
+model OrderEvent {
+  id          String         @id @default(uuid())
+  orderId     String
+  actorUserId String
+  eventType   OrderEventType
+  oldStatus   OrderStatus?
+  newStatus   OrderStatus?
+  orderLineId String?
+  reason      String?
+  note        String?
+  metadata    Json?
+  createdAt   DateTime       @default(now())
+
+  order     Order      @relation(fields: [orderId], references: [id])
+  actor     User       @relation("EventActor", fields: [actorUserId], references: [id])
+  orderLine OrderLine? @relation(fields: [orderLineId], references: [id])
+
+  @@index([orderId, createdAt])
+  @@index([actorUserId])
+}
+
+model OrderAlert {
+  id               String    @id @default(uuid())
+  orderId          String
+  acknowledgedById String?
+  acknowledgedAt   DateTime?
+  nextAlertAt      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  order          Order @relation(fields: [orderId], references: [id])
+  acknowledgedBy User? @relation("AlertAcknowledgedBy", fields: [acknowledgedById], references: [id])
+
+  @@index([orderId])
+  @@index([nextAlertAt])
+}

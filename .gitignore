@@ -10,3 +10,7 @@ venv/
 .env.*.local
 *.log
 .DS_Store
+server/.agents/
+server/.claude/
+server/.windsurf/
+server/skills-lock.json
