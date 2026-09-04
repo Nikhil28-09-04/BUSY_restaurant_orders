@@ -1,17 +1,25 @@
-const express = require("express");
+import express from "express";
+import cookieParser from "cookie-parser";
+import authRouter from "./routes/auth.js";
+import menuRouter from "./routes/menu.js";
+import ordersRouter from "./routes/orders.js";
+import orderLinesRouter from "./routes/orderLines.js";
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
+app.use(cookieParser());
 
 app.get("/api/health", (req, res) => {
-  res.json({
-    status: "ok",
-    message: "BUSY Restaurant Orders API is running",
-  });
+  res.json({ status: "ok" });
 });
 
+app.use("/api/auth", authRouter);
+app.use("/api/menu", menuRouter);
+app.use("/api/orders", ordersRouter);
+app.use("/api/order-lines", orderLinesRouter);
+
 app.listen(PORT, () => {
-  console.log(`Server running at http://localhost:${PORT}`);
+  console.log(`Server running on port ${PORT}`);
 });
