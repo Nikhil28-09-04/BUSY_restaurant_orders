@@ -12,7 +12,7 @@ const PORT = process.env.PORT || 3000;
 
 app.use(
   cors({
-    origin: "https://busy-restaurant-orders-p5nveyrhc-tests-projects-d49f9ef5.vercel.app",
+    origin: "process.env.CLIENT_URL || "http://localhost:5173",
     credentials: true,
   }),
 );
