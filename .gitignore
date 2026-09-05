@@ -14,3 +14,5 @@ server/.agents/
 server/.claude/
 server/.windsurf/
 server/skills-lock.json
+server/*-cookies.txt
+server/orders-*.csv

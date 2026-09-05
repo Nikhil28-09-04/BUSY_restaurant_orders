@@ -2,12 +2,13 @@ import express from "express";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../middleware/auth.js";
 import { requireOrderAccess } from "../middleware/orderAccess.js";
+import { requireRole } from "../middleware/role.js";
 
 const router = express.Router();
 
-router.post("/", requireAuth, requireOrderAccess,async (req, res) => {
+router.post("/", requireAuth, async (req, res) => {
   try {
-    const { tableNumber } = req.body;
+    const { tableNumber, primaryWaiterId  } = req.body;
 
     if (!tableNumber || !String(tableNumber).trim()) {
       return res.status(400).json({
@@ -15,11 +16,35 @@ router.post("/", requireAuth, requireOrderAccess,async (req, res) => {
       });
     }
 
+    if (req.user.role === "MANAGER") {
+      if (!primaryWaiterId) {
+        return res.status(400).json({
+          error: "Primary waiter is required",
+        });
+      }
+
+      const waiter = await prisma.user.findFirst({
+        where: {
+          id: primaryWaiterId,
+          role: "WAITER",
+        },
+      });
+
+      if (!waiter) {
+        return res.status(400).json({
+          error: "Selected primary waiter is invalid",
+        });
+      }
+    }
+
     const order = await prisma.$transaction(async (transaction) => {
       const createdOrder = await transaction.order.create({
         data: {
           tableNumber: String(tableNumber).trim(),
-          primaryWaiterId: req.user.userId,
+          primaryWaiterId:
+            req.user.role === "MANAGER"
+            ? primaryWaiterId
+            : req.user.userId,
         },
       });
 
@@ -40,6 +65,599 @@ router.post("/", requireAuth, requireOrderAccess,async (req, res) => {
     });
   } catch (error) {
     console.error("Create order error:", error);
+
+    return res.status(500).json({
+      error: "Internal server error",
+    });
+  }
+});
+
+router.get("/", requireAuth, async (req, res) => {
+  try {
+    const {
+      search,
+      status,
+      waiterId,
+      date,
+      sortBy = "placedAt",
+      sortOrder = "desc",
+      page = "1",
+      limit = "10",
+    } = req.query;
+
+    const pageNumber = Math.max(Number(page), 1);
+    const limitNumber = Math.min(Math.max(Number(limit), 1), 100);
+
+    const where = {
+      archivedAt: null,
+    };
+
+    // Waiters can see only their own orders or collaboration orders.
+    if (req.user.role !== "MANAGER") {
+      where.OR = [
+        {
+          primaryWaiterId: req.user.userId,
+        },
+        {
+          collaborators: {
+            some: {
+              userId: req.user.userId,
+            },
+          },
+        },
+      ];
+    }
+
+    // Search by table number.
+    if (search) {
+      where.tableNumber = {
+        contains: String(search),
+        mode: "insensitive",
+      };
+    }
+
+    // Filter by order status.
+    if (status) {
+      where.status = String(status).toUpperCase();
+    }
+
+    // Filter by primary waiter.
+    if (waiterId) {
+      where.primaryWaiterId = String(waiterId);
+    }
+
+    // Filter by placed date.
+    if (date) {
+      const startOfDay = new Date(`${date}T00:00:00.000Z`);
+      const endOfDay = new Date(`${date}T23:59:59.999Z`);
+
+      where.placedAt = {
+        gte: startOfDay,
+        lte: endOfDay,
+      };
+    }
+
+    const allowedSortFields = [
+      "placedAt",
+      "status",
+      "tableNumber",
+    ];
+
+    const safeSortBy = allowedSortFields.includes(String(sortBy))
+      ? String(sortBy)
+      : "placedAt";
+
+    const safeSortOrder =
+      String(sortOrder).toLowerCase() === "asc"
+        ? "asc"
+        : "desc";
+
+    const skip = (pageNumber - 1) * limitNumber;
+
+    const [orders, total] = await prisma.$transaction([
+      prisma.order.findMany({
+        where,
+        include: {
+          primaryWaiter: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
+          },
+          lines: {
+            where: {
+              voidedAt: null,
+            },
+            include: {
+              menuItem: {
+                select: {
+                  name: true,
+                },
+              },
+            },
+          },
+        },
+        orderBy: {
+          [safeSortBy]: safeSortOrder,
+        },
+        skip,
+        take: limitNumber,
+      }),
+
+      prisma.order.count({ where }),
+    ]);
+
+    const formattedOrders = orders.map((order) => {
+      const total = order.lines.reduce((sum, line) => {
+        return sum + Number(line.unitPrice) * line.quantity;
+      }, 0);
+
+      return {
+        ...order,
+        total: total.toFixed(2),
+      };
+    });
+
+    return res.json({
+      orders: formattedOrders,
+      pagination: {
+        page: pageNumber,
+        limit: limitNumber,
+        total,
+        totalPages: Math.ceil(total / limitNumber),
+      },
+    });
+  } catch (error) {
+    console.error("List orders error:", error);
+
+    return res.status(500).json({
+      error: "Internal server error",
+    });
+  }
+});
+
+router.get(
+  "/archived",
+  requireAuth,
+  requireRole("MANAGER"),
+  async (req, res) => {
+    try {
+      const orders = await prisma.order.findMany({
+        where: {
+          archivedAt: {
+            not: null,
+          },
+        },
+        include: {
+          primaryWaiter: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
+          },
+          lines: {
+            include: {
+              menuItem: true,
+            },
+          },
+        },
+        orderBy: {
+          archivedAt: "desc",
+        },
+      });
+
+      const ordersWithTotals = orders.map((order) => {
+        const total = order.lines.reduce((sum, line) => {
+          if (line.voidedAt) {
+            return sum;
+          }
+
+          return sum + Number(line.unitPrice) * line.quantity;
+        }, 0);
+
+        return {
+          ...order,
+          total: total.toFixed(2),
+        };
+      });
+
+      return res.json(ordersWithTotals);
+    } catch (error) {
+      console.error("Get archived orders error:", error);
+
+      return res.status(500).json({
+        error: "Internal server error",
+      });
+    }
+  },
+);
+
+router.get(
+  "/export/csv",
+  requireAuth,
+  requireRole("MANAGER"),
+  async (req, res) => {
+    try {
+      const { date } = req.query;
+
+      if (!date) {
+        return res.status(400).json({
+          error: "date query parameter is required in YYYY-MM-DD format",
+        });
+      }
+
+      const startOfDay = new Date(`${date}T00:00:00.000Z`);
+      const endOfDay = new Date(`${date}T23:59:59.999Z`);
+
+      if (
+        Number.isNaN(startOfDay.getTime()) ||
+        Number.isNaN(endOfDay.getTime())
+      ) {
+        return res.status(400).json({
+          error: "Invalid date format",
+        });
+      }
+
+      const orders = await prisma.order.findMany({
+        where: {
+          placedAt: {
+            gte: startOfDay,
+            lte: endOfDay,
+          },
+        },
+        include: {
+          primaryWaiter: {
+            select: {
+              name: true,
+              email: true,
+            },
+          },
+          lines: {
+            where: {
+              voidedAt: null,
+            },
+          },
+        },
+        orderBy: {
+          placedAt: "asc",
+        },
+      });
+
+      const escapeCsv = (value) => {
+        const text = String(value ?? "");
+
+        if (
+          text.includes(",") ||
+          text.includes('"') ||
+          text.includes("\n")
+        ) {
+          return `"${text.replaceAll('"', '""')}"`;
+        }
+
+        return text;
+      };
+
+      const rows = [
+        [
+          "Order ID",
+          "Table Number",
+          "Primary Waiter",
+          "Waiter Email",
+          "Status",
+          "Placed At",
+          "Total",
+        ],
+      ];
+
+      for (const order of orders) {
+        const total = order.lines.reduce((sum, line) => {
+          return sum + Number(line.unitPrice) * line.quantity;
+        }, 0);
+
+        rows.push([
+          order.id,
+          order.tableNumber,
+          order.primaryWaiter.name,
+          order.primaryWaiter.email,
+          order.status,
+          order.placedAt.toISOString(),
+          total.toFixed(2),
+        ]);
+      }
+
+      const csv = rows
+        .map((row) => row.map(escapeCsv).join(","))
+        .join("\r\n");
+
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="orders-${date}.csv"`
+      );
+
+      return res.send(csv);
+    } catch (error) {
+      console.error("Export orders CSV error:", error);
+
+      return res.status(500).json({
+        error: "Internal server error",
+      });
+    }
+  }
+);
+
+router.get(
+  "/dashboard/summary",
+  requireAuth,
+  requireRole("MANAGER"),
+  async (req, res) => {
+    try {
+      const now = new Date();
+
+      const startOfToday = new Date(
+        Date.UTC(
+          now.getUTCFullYear(),
+          now.getUTCMonth(),
+          now.getUTCDate()
+        )
+      );
+
+      const startOfTomorrow = new Date(startOfToday);
+      startOfTomorrow.setUTCDate(startOfTomorrow.getUTCDate() + 1);
+
+      const startOf14DaysAgo = new Date(startOfToday);
+      startOf14DaysAgo.setUTCDate(startOf14DaysAgo.getUTCDate() - 13);
+
+      const [
+        openOrders,
+        placedToday,
+        servedToday,
+        servedTodayOrders,
+        ordersByStatus,
+        ordersByWaiter,
+        servedLast14Days,
+      ] = await prisma.$transaction([
+        prisma.order.count({
+          where: {
+            archivedAt: null,
+            status: {
+              notIn: ["SERVED", "CANCELLED"],
+            },
+          },
+        }),
+
+        prisma.order.count({
+          where: {
+            archivedAt: null,
+            placedAt: {
+              gte: startOfToday,
+              lt: startOfTomorrow,
+            },
+          },
+        }),
+
+        prisma.order.count({
+          where: {
+            archivedAt: null,
+            status: "SERVED",
+            updatedAt: {
+              gte: startOfToday,
+              lt: startOfTomorrow,
+            },
+          },
+        }),
+
+        prisma.order.findMany({
+          where: {
+            archivedAt: null,
+            status: "SERVED",
+            updatedAt: {
+              gte: startOfToday,
+              lt: startOfTomorrow,
+            },
+          },
+          include: {
+            lines: {
+              where: {
+                voidedAt: null,
+              },
+            },
+          },
+        }),
+
+        prisma.order.groupBy({
+          by: ["status"],
+          where: {
+            archivedAt: null,
+          },
+          _count: {
+            id: true,
+          },
+        }),
+
+        prisma.order.groupBy({
+          by: ["primaryWaiterId"],
+          where: {
+            archivedAt: null,
+          },
+          _count: {
+            id: true,
+          },
+        }),
+
+        prisma.order.findMany({
+          where: {
+            archivedAt: null,
+            status: "SERVED",
+            updatedAt: {
+              gte: startOf14DaysAgo,
+              lt: startOfTomorrow,
+            },
+          },
+          select: {
+            updatedAt: true,
+          },
+          orderBy: {
+            updatedAt: "asc",
+          },
+        }),
+      ]);
+
+      const revenueToday = servedTodayOrders.reduce((sum, order) => {
+        const orderTotal = order.lines.reduce((lineSum, line) => {
+          return lineSum + Number(line.unitPrice) * line.quantity;
+        }, 0);
+
+        return sum + orderTotal;
+      }, 0);
+
+      const waiterIds = ordersByWaiter.map(
+        (item) => item.primaryWaiterId
+      );
+
+      const waiters = await prisma.user.findMany({
+        where: {
+          id: {
+            in: waiterIds,
+          },
+        },
+        select: {
+          id: true,
+          name: true,
+          email: true,
+        },
+      });
+
+      const waiterMap = new Map(
+        waiters.map((waiter) => [waiter.id, waiter])
+      );
+
+      const byWaiter = ordersByWaiter.map((item) => ({
+        waiter: waiterMap.get(item.primaryWaiterId) || {
+          id: item.primaryWaiterId,
+          name: "Unknown",
+          email: "",
+        },
+        count: item._count.id,
+      }));
+
+      const byStatus = ordersByStatus.map((item) => ({
+        status: item.status,
+        count: item._count.id,
+      }));
+
+      const servedChart = [];
+
+      for (let i = 0; i < 14; i++) {
+        const day = new Date(startOf14DaysAgo);
+        day.setUTCDate(day.getUTCDate() + i);
+
+        const nextDay = new Date(day);
+        nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+
+        const count = servedLast14Days.filter((order) => {
+          return (
+            order.updatedAt >= day &&
+            order.updatedAt < nextDay
+          );
+        }).length;
+
+        servedChart.push({
+          date: day.toISOString().slice(0, 10),
+          served: count,
+        });
+      }
+
+      return res.json({
+        summary: {
+          openOrders,
+          placedToday,
+          servedToday,
+          revenueToday: revenueToday.toFixed(2),
+        },
+        byStatus,
+        byWaiter,
+        servedLast14Days: servedChart,
+      });
+    } catch (error) {
+      console.error("Dashboard summary error:", error);
+
+      return res.status(500).json({
+        error: "Internal server error",
+      });
+    }
+  }
+);
+
+
+router.post("/:orderId/notes", requireAuth, async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const { note } = req.body;
+
+    if (!note || !note.trim()) {
+      return res.status(400).json({
+        error: "Note is required",
+      });
+    }
+
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      select: {
+        id: true,
+        status: true,
+        primaryWaiterId: true,
+        archivedAt: true,
+        collaborators: {
+          where: {
+            userId: req.user.userId,
+          },
+          select: {
+            userId: true,
+          },
+        },
+      },
+    });
+
+    if (!order || order.archivedAt) {
+      return res.status(404).json({
+        error: "Order not found",
+      });
+    }
+
+    const isManager = req.user.role === "MANAGER";
+    const isPrimaryWaiter = order.primaryWaiterId === req.user.userId;
+    const isCollaborator = order.collaborators.length > 0;
+
+    if (!isManager && !isPrimaryWaiter && !isCollaborator) {
+      return res.status(403).json({
+        error: "You do not have access to this order",
+      });
+    }
+
+    if (order.status === "SERVED" || order.status === "CANCELLED") {
+      return res.status(400).json({
+        error: "Cannot add notes to a completed or cancelled order",
+      });
+    }
+
+    const event = await prisma.orderEvent.create({
+      data: {
+        orderId,
+        actorUserId: req.user.userId,
+        eventType: "NOTE_ADDED",
+        note: note.trim(),
+      },
+    });
+
+    return res.status(201).json({
+      message: "Note added successfully",
+      event,
+    });
+  } catch (error) {
+    console.error("Add order note error:", error);
 
     return res.status(500).json({
       error: "Internal server error",
@@ -105,6 +723,84 @@ router.get("/:orderId", requireAuth, requireOrderAccess, async (req, res) => {
     });
   }
 });
+
+router.patch(
+  "/:orderId/archive",
+  requireAuth,
+  requireRole("MANAGER"),
+  async (req, res) => {
+    try {
+      const { orderId } = req.params;
+
+      const order = await prisma.order.findUnique({
+        where: { id: orderId },
+      });
+
+      if (!order || order.archivedAt) {
+        return res.status(404).json({
+          error: "Order not found",
+        });
+      }
+
+      const archivedOrder = await prisma.order.update({
+        where: { id: orderId },
+        data: {
+          archivedAt: new Date(),
+        },
+      });
+
+      return res.json({
+        message: "Order archived successfully",
+        order: archivedOrder,
+      });
+    } catch (error) {
+      console.error("Archive order error:", error);
+
+      return res.status(500).json({
+        error: "Internal server error",
+      });
+    }
+  }
+);
+
+router.patch(
+  "/:orderId/restore",
+  requireAuth,
+  requireRole("MANAGER"),
+  async (req, res) => {
+    try {
+      const { orderId } = req.params;
+
+      const order = await prisma.order.findUnique({
+        where: { id: orderId },
+      });
+
+      if (!order || !order.archivedAt) {
+        return res.status(404).json({
+          error: "Archived order not found",
+        });
+      }
+
+      const restoredOrder = await prisma.order.update({
+        where: { id: orderId },
+        data: {
+          archivedAt: null,
+        },
+      });
+
+      return res.json({
+        message: "Order restored successfully",
+        order: restoredOrder,
+      });
+    } catch (error) {
+      console.error("Restore order error:", error);
+
+      return res.status(500).json({
+        error: "Internal server error",
+      });
+    }
+  }
+);
 
 router.patch("/:orderId/status", requireAuth, requireOrderAccess, async (req, res) => {
   try {

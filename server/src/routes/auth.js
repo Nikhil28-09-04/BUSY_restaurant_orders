@@ -80,5 +80,37 @@ router.get("/me", requireAuth, (req, res) => {
 });
 
 
+router.get(
+  "/waiters",
+  requireAuth,
+  requireRole("MANAGER"),
+  async (req, res) => {
+    try {
+      const waiters = await prisma.user.findMany({
+        where: {
+          role: "WAITER",
+        },
+        select: {
+          id: true,
+          name: true,
+          email: true,
+        },
+        orderBy: {
+          name: "asc",
+        },
+      });
+
+      return res.json({ waiters });
+    } catch (error) {
+      console.error("Get waiters error:", error);
+
+      return res.status(500).json({
+        error: "Could not load waiters",
+      });
+    }
+  }
+);
+
+
 
 export default router;

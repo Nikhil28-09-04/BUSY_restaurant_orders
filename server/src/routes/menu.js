@@ -64,6 +64,115 @@ router.post("/", requireAuth, requireRole("MANAGER"), async (req, res) => {
   }
 });
 
+router.patch(
+  "/bulk",
+  requireAuth,
+  requireRole("MANAGER"),
+  async (req, res) => {
+    try {
+      const { items } = req.body;
+
+      if (!Array.isArray(items) || items.length === 0) {
+        return res.status(400).json({
+          error: "items must be a non-empty array",
+        });
+      }
+
+      const results = [];
+
+      for (const item of items) {
+        const { id, price, available } = item;
+
+        if (!id) {
+          results.push({
+            id: null,
+            success: false,
+            error: "Menu item ID is required",
+          });
+          continue;
+        }
+
+        if (price === undefined && available === undefined) {
+          results.push({
+            id,
+            success: false,
+            error: "At least price or available must be provided",
+          });
+          continue;
+        }
+
+        if (
+          price !== undefined &&
+          (typeof price !== "number" || !Number.isFinite(price) || price <= 0)
+        ) {
+          results.push({
+            id,
+            success: false,
+            error: "Price must be a positive number",
+          });
+          continue;
+        }
+
+        try {
+          const existingItem = await prisma.menuItem.findUnique({
+            where: { id },
+          });
+
+          if (!existingItem || existingItem.archivedAt) {
+            results.push({
+              id,
+              success: false,
+              error: "Menu item not found",
+            });
+            continue;
+          }
+
+          const updatedItem = await prisma.menuItem.update({
+            where: { id },
+            data: {
+              ...(price !== undefined ? { price } : {}),
+              ...(available !== undefined ? { available } : {}),
+            },
+          });
+
+          results.push({
+            id,
+            success: true,
+            item: updatedItem,
+          });
+        } catch (error) {
+          console.error(`Bulk update failed for menu item ${id}:`, error);
+
+          results.push({
+            id,
+            success: false,
+            error: "Could not update this menu item",
+          });
+        }
+      }
+
+      const successful = results.filter((result) => result.success).length;
+      const failed = results.length - successful;
+
+      return res.json({
+        message: "Bulk menu update completed",
+        summary: {
+          total: results.length,
+          successful,
+          failed,
+        },
+        results,
+      });
+    } catch (error) {
+      console.error("Bulk menu update error:", error);
+
+      return res.status(500).json({
+        error: "Internal server error",
+      });
+    }
+  }
+);
+
 router.patch("/:id", requireAuth, requireRole("MANAGER"), async (req, res) => {
   try {
     const { id } = req.params;

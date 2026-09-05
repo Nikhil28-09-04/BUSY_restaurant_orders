@@ -1,6 +1,7 @@
 import express from "express";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../middleware/auth.js";
+import { requireOrderLineAccess } from "../middleware/orderAccess.js";
 
 const router = express.Router();
 
@@ -26,14 +27,38 @@ router.post("/", requireAuth, async (req, res) => {
     }
 
     const order = await prisma.order.findUnique({
-      where: {
-        id: orderId,
+      where: { id: orderId },
+      select: {
+        id: true,
+        primaryWaiterId: true,
+        status: true,
+        archivedAt: true,
+        collaborators: {
+          where: {
+            userId: req.user.userId,
+          },
+          select: {
+            userId: true,
+          },
+        },
       },
     });
 
     if (!order || order.archivedAt) {
       return res.status(404).json({
         error: "Order not found",
+      });
+    }
+
+    const isManager = req.user.role === "MANAGER";
+    const isPrimaryWaiter =
+      order.primaryWaiterId === req.user.userId;
+    const isCollaborator =
+      order.collaborators.length > 0;
+
+    if (!isManager && !isPrimaryWaiter && !isCollaborator) {
+      return res.status(403).json({
+        error: "You do not have access to this order",
       });
     }
 
@@ -70,28 +95,28 @@ router.post("/", requireAuth, async (req, res) => {
           unitPrice: menuItem.price,
           instructions: instructions?.trim() || null,
         },
-    });
+      });
 
-    await transaction.orderEvent.create({
-      data: {
-        orderId,
-        actorUserId: req.user.userId,
-        eventType: "LINE_ADDED",
-        orderLineId: createdLine.id,
-        metadata: {
+      await transaction.orderEvent.create({
+        data: {
+          orderId,
+          actorUserId: req.user.userId,
+          eventType: "LINE_ADDED",
+          orderLineId: createdLine.id,
+          metadata: {
             menuItemName: menuItem.name,
             quantity: numericQuantity,
             unitPrice: menuItem.price.toString(),
+          },
         },
-      },
-    });
+      });
 
-  return createdLine;
-});
+      return createdLine;
+    });
 
     const lines = await prisma.orderLine.findMany({
       where: {
-        orderId: orderId,
+        orderId,
         voidedAt: null,
       },
     });
@@ -113,7 +138,7 @@ router.post("/", requireAuth, async (req, res) => {
   }
 });
 
-router.patch("/:lineId/void", requireAuth, async (req, res) => {
+router.patch("/:lineId/void", requireAuth, requireOrderLineAccess, async (req, res) => {
   try {
     const { lineId } = req.params;
     const { reason } = req.body;
