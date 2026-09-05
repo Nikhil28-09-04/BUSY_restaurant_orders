@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import "./App.css";
 
-const API_URL = "http://localhost:3000/api";
+// const API_URL = "http://localhost:3000/api";
+
+const API_URL = "https://busy-restaurant-backend.onrender.com/api";
 
 const validTransitions = {
   PLACED: ["ACCEPTED", "CANCELLED"],
@@ -93,7 +95,7 @@ function App() {
       setCreatingOrder(true);
       setError("");
 
-      const response = await fetch("http://localhost:3000/api/orders", {
+      const response = await fetch(`${API_URL}/orders`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -163,7 +165,7 @@ function App() {
       params.set("limit", limit);
 
       const response = await fetch(
-        `http://localhost:3000/api/orders?${params.toString()}`,
+        `${API_URL}/orders?${params.toString()}`,
         {
           credentials: "include",
         },
@@ -331,7 +333,7 @@ function App() {
 
     try {
       const response = await fetch(
-        `http://localhost:3000/api/orders/${selectedOrder.id}/notes`,
+        `${API_URL}/orders/${selectedOrder.id}/notes`,
         {
           method: "POST",
           credentials: "include",
@@ -425,7 +427,7 @@ function App() {
 
     try {
       const response = await fetch(
-        `http://localhost:3000/api/orders/${orderId}/events`,
+        `${API_URL}/orders/${orderId}/events`,
         {
           credentials: "include",
         },
@@ -538,7 +540,7 @@ function App() {
 
     try {
       const response = await fetch(
-        `http://localhost:3000/api/orders/${selectedOrder.id}/archive`,
+        `${API_URL}/orders/${selectedOrder.id}/archive`,
         {
           method: "PATCH",
           credentials: "include",
@@ -564,7 +566,7 @@ function App() {
 
     try {
       const response = await fetch(
-        "http://localhost:3000/api/orders/archived",
+        `${API_URL}/orders/archived`,
         {
           credentials: "include",
         },
@@ -589,7 +591,7 @@ function App() {
 
     try {
       const response = await fetch(
-        `http://localhost:3000/api/orders/${orderId}/restore`,
+        `${API_URL}/orders/${orderId}/restore`,
         {
           method: "PATCH",
           credentials: "include",
@@ -615,7 +617,7 @@ function App() {
 
     try {
       const response = await fetch(
-        "http://localhost:3000/api/orders/dashboard/summary",
+        `${API_URL}/orders/dashboard/summary`,
         {
           credentials: "include",
         },
@@ -643,7 +645,7 @@ function App() {
       }
 
       const response = await fetch(
-        `http://localhost:3000/api/orders/export/csv?date=${exportDate}`,
+        `${API_URL}/orders/export/csv?date=${exportDate}`,
         {
           credentials: "include",
         },
