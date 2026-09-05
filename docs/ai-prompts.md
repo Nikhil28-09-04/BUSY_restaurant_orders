@@ -49,8 +49,6 @@ The suggested solution was to generate the Prisma client during the Render build
 ### What I corrected
 
 I changed the Render build command to:
-
-```bash
 npm install && npx prisma generate
 
 ## Fixing CORS and authentication errors
@@ -70,8 +68,6 @@ It also explained that the frontend and backend were hosted on different domains
 An early suggestion was to hardcode the Vercel frontend URL in the backend CORS configuration. This worked temporarily, but it was not a good long-term solution because the frontend URL could change.
 
 I changed the backend to use the environment variable instead:
-
-```js
 origin: process.env.CLIENT_URL || "http://localhost:5173"
 
 ## Git and project history
